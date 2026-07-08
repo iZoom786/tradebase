@@ -6,8 +6,6 @@
 # - features: Technical indicator calculation
 # - ml-engine: ML prediction service
 
-version: '3.8'
-
 services:
   # =====================================================
   # Ingestion Service - Data Ingestion from YFinance

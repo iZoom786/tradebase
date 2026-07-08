@@ -60,7 +60,7 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # Copy application code
-COPY services/ingestion/ /app/
+COPY services/ /app/services/
 COPY libs/ /app/libs/
 COPY config/ /app/config/
 

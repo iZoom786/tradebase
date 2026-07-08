@@ -34,7 +34,7 @@ FROM python:3.11-slim
 # Set labels
 LABEL maintainer="Tradebase Team"
 LABEL version="${VERSION}"
-Label description="Tradebase Ingestion Service - Data ingestion from YFinance"
+LABEL description="Tradebase Ingestion Service - Data ingestion from YFinance"
 LABEL build-date="${BUILD_DATE}"
 
 # Set environment variables

@@ -678,6 +678,18 @@ Significant enhancement of the ingestion system with the following improvements:
 | `services/ingestion/controllers/ingestion_controller_v2.py` | Enhanced controller with 3-row logic |
 | `services/ingestion/providers/yfinance_v2.py` | Provider with N-candle fetching |
 | `scripts/backfill_v2.py` | Enhanced backfill CLI |
+
+---
+
+## 🛠️ Work Completed Before Start
+
+- Fixed `services/ingestion/Dockerfile` so runtime image copies the full `services/` package into `/app/services/`, resolving the `ModuleNotFoundError: No module named 'services'` issue.
+- Normalized Dockerfile instruction casing by changing `Label description=...` to `LABEL description=...`.
+- Updated `docker-compose-final-prod.yml` to avoid port conflict by changing NATS web mapping from `8080:8080` to `8081:8080`.
+- Verified the deployed code path and identified missing `services/ingestion/models` package issues in the Dokploy container path.
+- Confirmed that `scripts/backfill_v2.py` should be run from the project root on the host, not inside the ingestion container image.
+- Captured the correct service entrypoint and package layout for ingestion startup troubleshooting.
+
 | `docs/ingestion-v2-upgrade-guide.md` | Complete documentation |
 
 ### Database Schema Changes (v2.0)

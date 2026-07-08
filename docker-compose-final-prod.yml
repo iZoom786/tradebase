@@ -30,7 +30,7 @@ services:
     ports:
       - "4222:4222"
       - "8222:8222"
-      - "8080:8080"
+      - "8081:8080"
     volumes:
       - nats_data:/data
       - ./infrastructure/nats/nats_simple.conf:/etc/nats/nats_simple.conf:ro

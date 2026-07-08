@@ -1,0 +1,338 @@
+# Tradebase Platform - CI Pipeline
+# Runs on every pull request and push to main branch
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # =====================================================
+  # Job 1: Code Quality Checks
+  # =====================================================
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install black ruff mypy pylint
+
+      - name: Check formatting (Black)
+        run: black --check --diff services/ libs/
+
+      - name: Lint with Ruff
+        run: ruff check services/ libs/
+
+      - name: Type check with MyPy
+        run: mypy services/ libs/ --ignore-missing-imports
+
+  # =====================================================
+  # Job 2: Run Tests
+  # =====================================================
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: code-quality
+
+    services:
+      timescaledb:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_DB: tradebase_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      nats:
+        image: nats:latest
+        command: "--jetstream"
+        options: >-
+          --health-cmd "wget --quiet --tries=1 --spider http://localhost:8222/ || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 4222:4222
+          - 8222:8222
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for TimescaleDB..."
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "TimescaleDB not ready yet..."
+            sleep 2
+          done
+          echo "TimescaleDB ready!"
+
+      - name: Initialize TimescaleDB
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -p 5432 -U postgres -d postgres -c "CREATE DATABASE tradebase_test;" || true
+          psql -h localhost -p 5432 -U postgres -d tradebase_test -f infrastructure/timescaledb/init.sql
+
+      - name: Run tests with coverage
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_DATABASE: tradebase_test
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          NATS_URL: nats://localhost:4222
+        run: |
+          pytest tests/ -v \
+            --cov=services \
+            --cov=libs \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: Check coverage threshold
+        run: |
+          coverage=$(coverage report | grep TOTAL | awk '{print $4}' | sed 's/%//')
+          if (( $(echo "$coverage < 70" | bc -l) )); then
+            echo "Coverage $coverage% is below 70% threshold"
+            exit 1
+          fi
+          echo "Coverage $coverage% meets threshold"
+
+  # =====================================================
+  # Job 3: Security Scanning
+  # =====================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: code-quality
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety
+
+      - name: Run Bandit security linter
+        run: bandit -r services/ libs/ -f json -o bandit-report.json || true
+
+      - name: Check for vulnerabilities
+        run: |
+          pip freeze | safety check --json > safety-report.json || true
+          safety check || true
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+
+  # =====================================================
+  # Job 4: Docker Build Validation
+  # =====================================================
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [test, security]
+
+    strategy:
+      matrix:
+        service:
+          - ingestion
+          # Add other services as they're implemented
+          # - features
+          # - ml-engine
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.service }} image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          tags: tradebase/${{ matrix.service }}:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          load: true
+
+      - name: Test image
+        run: |
+          docker run --rm tradebase/${{ matrix.service }}:test python -c "import sys; print('Python OK')"
+
+  # =====================================================
+  # Job 5: Configuration Validation
+  # =====================================================
+  config-validation:
+    name: Config Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "."
+          pip install pydantic
+
+      - name: Validate NATS configuration
+        run: |
+          python -c "
+          from libs.common.config import NATSConfig
+          config = NATSConfig()
+          print(f'NATS URL: {config.url}')
+          print(f'Max Reconnect: {config.max_reconnect}')
+          assert config.url.startswith('nats://'), 'Invalid NATS URL'
+          print('✓ NATS config valid')
+          "
+
+      - name: Validate Database configuration
+        run: |
+          python -c "
+          from libs.common.config import DatabaseConfig
+          config = DatabaseConfig()
+          print(f'DB Host: {config.host}')
+          print(f'DB Port: {config.port}')
+          assert 1 <= config.port <= 65535, 'Invalid port'
+          print('✓ Database config valid')
+          "
+
+      - name: Validate Ingestion configuration
+        run: |
+          python -c "
+          from services.ingestion.config import IngestionConfig
+          config = IngestionConfig()
+          print(f'Provider: {config.provider.value}')
+          print(f'Symbols: {config.symbols}')
+          print(f'Interval: {config.interval.value}')
+          assert len(config.symbols) > 0, 'No symbols configured'
+          assert len(config.symbols) == len(set(config.symbols)), 'Duplicate symbols'
+          print('✓ Ingestion config valid')
+          "
+
+  # =====================================================
+  # Job 6: Docker Compose Validation
+  # =====================================================
+  compose-validation:
+    name: Docker Compose Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose syntax
+        run: |
+          docker-compose -f docker-compose.yml config
+          docker-compose -f docker-compose.prod.yml config
+          docker-compose -f docker-compose.ingestion.yml config
+
+      - name: Start infrastructure
+        run: |
+          docker-compose -f docker-compose.yml up -d
+          echo "Waiting for services to be healthy..."
+          sleep 30
+
+      - name: Check services are running
+        run: |
+          docker-compose ps
+          curl -f http://localhost:9090/-/healthy || echo "Prometheus not ready"
+          curl -f http://localhost:3001/api/health || echo "Grafana not ready"
+
+      - name: Stop infrastructure
+        run: docker-compose -f docker-compose.yml down
+
+  # =====================================================
+  # Job 7: Summary Report
+  # =====================================================
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [test, docker, config-validation, compose-validation]
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build | ${{ needs.docker.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Config Validation | ${{ needs.config-validation.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compose Validation | ${{ needs.compose-validation.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check for failures
+        if: |
+          needs.test.result == 'failure' ||
+          needs.docker.result == 'failure' ||
+          needs.config-validation.result == 'failure' ||
+          needs.compose-validation.result == 'failure'
+        run: exit 1

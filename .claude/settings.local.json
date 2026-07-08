@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x e:/tradebase/scripts/dev.sh e:/tradebase/scripts/deploy.sh)",
+      "Bash(docker-compose ps *)",
+      "Bash(docker-compose logs *)",
+      "Bash(docker-compose up *)",
+      "Bash(docker-compose restart *)",
+      "Bash(python -m py_compile services/ingestion/main.py)",
+      "Bash(python -c \"from libs.nats_client import NATSClient; print\\('NATSClient import OK'\\)\")",
+      "Bash(python -c \"from services.ingestion.controllers import IngestionController; print\\('IngestionController import OK'\\)\")",
+      "Bash(netstat -ano)",
+      "Bash(docker-compose down *)",
+      "Bash(docker stop *)",
+      "Bash(docker exec *)",
+      "Bash(docker-compose exec *)",
+      "Bash(curl -s http://localhost:8222/varz)",
+      "Bash(curl -s http://localhost:9090/-/healthy)",
+      "Bash(curl -s http://localhost:3001/api/health)",
+      "Bash(docker inspect *)",
+      "Bash(docker network *)"
+    ]
+  }
+}

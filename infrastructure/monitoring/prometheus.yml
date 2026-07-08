@@ -1,0 +1,50 @@
+# Prometheus configuration for Tradebase Platform
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'tradebase'
+    environment: 'development'
+
+# Alertmanager configuration (placeholder)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#             - alertmanager:9093
+
+# Rule files
+# rule_files:
+#   - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # NATS monitoring (via Prometheus exporter)
+  - job_name: 'nats'
+    static_configs:
+      - targets: ['nats-exporter:7777']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Services (to be added as services are deployed)
+  # - job_name: 'ingestion'
+  #   static_configs:
+  #     - targets: ['ingestion:9091']
+  #
+  # - job_name: 'features'
+  #   static_configs:
+  #     - targets: ['features:9092']
+  #
+  # - job_name: 'ml_engine'
+  #   static_configs:
+  #     - targets: ['ml_engine:9093']
+  #
+  # - job_name: 'paper_trading'
+  #   static_configs:
+  #     - targets: ['paper_trading:9094']

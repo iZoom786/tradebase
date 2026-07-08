@@ -1,0 +1,209 @@
+# Tradebase Data Pipeline Services - Docker Compose
+# Run with: docker-compose -f docker-compose.yml -f docker-compose.ingestion.yml up
+#
+# This compose file adds the data processing services to the base infrastructure:
+# - ingestion: YFinance data ingestion
+# - features: Technical indicator calculation
+# - ml-engine: ML prediction service
+
+version: '3.8'
+
+services:
+  # =====================================================
+  # Ingestion Service - Data Ingestion from YFinance
+  # =====================================================
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2024-01-01}
+        VERSION: ${VERSION:-1.0.0}
+    image: tradebase/ingestion:${VERSION:-latest}
+    container_name: tradebase_ingestion
+    restart: unless-stopped
+    ports:
+      - "8001:8001"  # Health check / admin port
+    environment:
+      # Database Configuration
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_DATABASE: tradebase
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_POOL_SIZE: 20
+
+      # NATS Configuration
+      NATS_URL: nats://nats:4222
+      NATS_MAX_RECONNECT: 10
+      NATS_PING_INTERVAL: 60
+      NATS_CONNECT_TIMEOUT: 5
+      NATS_TLS_ENABLED: "false"
+
+      # System user for NATS (internal services)
+      NATS_SYSTEM_USER: ${NATS_SYSTEM_USER:-system_internal}
+      NATS_SYSTEM_PASSWORD: ${NATS_SYSTEM_PASSWORD:-system_internal_password}
+
+      # Observability
+      OBS_JAEGER_ENDPOINT: http://jaeger:14268/api/traces
+      OBS_PROMETHEUS_PORT: 9091
+      OBS_LOG_LEVEL: INFO
+
+      # Ingestion Configuration
+      INGESTION_PROVIDER: yfinance
+      INGESTION_INTERVAL: 1m
+      INGESTION_SYMBOLS: EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,USDCAD,NZDUSD
+      INGESTION_BACKFILL_DAYS: 365
+
+      # Scheduler Configuration
+      INGESTION_SCHEDULER_ENABLED: "true"
+      INGESTION_SCHEDULER_INTERVAL_SECONDS: 60
+
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    networks:
+      - tradebase_default
+
+    volumes:
+      - ./logs/ingestion:/app/logs
+      - ./config:/app/config:ro
+
+  # =====================================================
+  # Features Service - Technical Indicator Calculation
+  # =====================================================
+  features:
+    build:
+      context: .
+      dockerfile: services/features/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2024-01-01}
+        VERSION: ${VERSION:-1.0.0}
+    image: tradebase/features:${VERSION:-latest}
+    container_name: tradebase_features
+    restart: unless-stopped
+    ports:
+      - "8003:8003"  # Health check port
+
+    environment:
+      # Database Configuration
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_DATABASE: tradebase
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+
+      # NATS Configuration
+      NATS_URL: nats://nats:4222
+      NATS_TLS_ENABLED: "false"
+      NATS_SYSTEM_USER: ${NATS_SYSTEM_USER:-system_internal}
+      NATS_SYSTEM_PASSWORD: ${NATS_SYSTEM_PASSWORD:-system_internal_password}
+
+      # Feature Configuration
+      FEATURE_CACHE_TTL_SECONDS: 300
+      FEATURE_LOOKBACK_BARS: 100
+      FEATURE_ENABLED_INDICATORS: rsi,elder,bollinger,atr
+
+      # Observability
+      OBS_JAEGER_ENDPOINT: http://jaeger:14268/api/traces
+      OBS_LOG_LEVEL: INFO
+
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      ingestion:
+        condition: service_healthy  # Wait for ingestion to start
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - tradebase_default
+
+    volumes:
+      - ./logs/features:/app/logs
+
+  # =====================================================
+  # ML Engine - Machine Learning Predictions
+  # =====================================================
+  ml-engine:
+    build:
+      context: .
+      dockerfile: services/ml-engine/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2024-01-01}
+        VERSION: ${VERSION:-1.0.0}
+    image: tradebase/ml-engine:${VERSION:-latest}
+    container_name: tradebase_ml_engine
+    restart: unless-stopped
+    ports:
+      - "8004:8004"  # Health check port
+
+    environment:
+      # Database Configuration
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_DATABASE: tradebase
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+
+      # NATS Configuration
+      NATS_URL: nats://nats:4222
+      NATS_TLS_ENABLED: "false"
+      NATS_SYSTEM_USER: ${NATS_SYSTEM_USER:-system_internal}
+      NATS_SYSTEM_PASSWORD: ${NATS_SYSTEM_PASSWORD:-system_internal_password}
+
+      # ML Configuration
+      ML_MODEL_PATH: /data/models
+      ML_RETRAIN_INTERVAL_HOURS: 168
+      ML_VALIDATION_SPLIT: 0.2
+      ML_EARLY_STOPPING_ROUNDS: 50
+
+      # Observability
+      OBS_JAEGER_ENDPOINT: http://jaeger:14268/api/traces
+      OBS_LOG_LEVEL: INFO
+
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      features:
+        condition: service_healthy  # Wait for features to be available
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    networks:
+      - tradebase_default
+
+    volumes:
+      - ./models:/data/models
+      - ./logs/ml-engine:/app/logs
+
+networks:
+  tradebase_default:
+    external: true
+
+volumes:
+  models:

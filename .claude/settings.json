@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(start http://localhost:3222)",
+      "Bash(docker network *)",
+      "Bash(docker exec *)",
+      "Bash(curl -s http://localhost:3222)",
+      "Bash(docker-compose logs *)"
+    ]
+  }
+}

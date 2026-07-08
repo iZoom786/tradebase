@@ -1,0 +1,170 @@
+# Tradebase Platform - Development Environment
+
+services:
+  # TimescaleDB - Time-series database
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: tradebase_timescaledb
+    environment:
+      POSTGRES_DB: tradebase
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      TIMESCALEDB_TELEMETRY: basic
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./infrastructure/timescaledb/init_v2.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NATS Server - Messaging broker (simplified config for Phase 1 testing)
+  nats:
+    image: nats:latest
+    container_name: tradebase_nats
+    command: "--jetstream --config /etc/nats/nats_simple.conf"
+    ports:
+      - "4222:4222"   # Client connections
+      - "4223:4223"   # Client connections (alternative)
+      - "8222:8222"   # Monitoring
+      - "8080:8080"   # WebSocket
+    volumes:
+      - nats_data:/data
+      - ./infrastructure/nats/nats_simple.conf:/etc/nats/nats_simple.conf:ro
+    environment:
+      # NATS system user credentials (for internal services)
+      - NATS_SYSTEM_USER=${NATS_SYSTEM_USER:-system_internal}
+      - NATS_SYSTEM_PASSWORD=${NATS_SYSTEM_PASSWORD:-system_internal_password}
+
+  # NATS Prometheus Exporter - Metrics exporter for Prometheus
+  nats-exporter:
+    image: natsio/prometheus-nats-exporter:latest
+    container_name: tradebase_nats_exporter
+    ports:
+      - "7777:7777"
+    command: ["-connz", "-subz", "-varz", "http://nats:8222"]
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+  # Redis - Cache layer
+  redis:
+    image: redis:7-alpine
+    container_name: tradebase_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: tradebase_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+
+  # Grafana - Metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: tradebase_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./infrastructure/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+
+  # Jaeger - Distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: tradebase_jaeger
+    ports:
+      - "5775:5775/udp"   # accept zipkin.thrift over compact thrift protocol
+      - "6831:6831/udp"   # accept jaeger.thrift over compact thrift protocol
+      - "6832:6832/udp"   # accept jaeger.thrift over binary thrift protocol
+      - "5778:5778"       # serve configs
+      - "16686:16686"     # serve frontend (with Web UI)
+      - "14268:14268"     # accept jaeger.thrift directly from clients
+      - "14250:14250"     # accept model.proto
+      - "9411:9411"       # Zipkin compatible endpoint
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+
+  # NATS NUI - Web UI for NATS management
+  natsnui:
+    image: ghcr.io/nats-nui/nui:latest
+    container_name: tradebase_natsnui
+    ports:
+      - "3222:31311"   # Web UI (NUI runs on port 31311 internally)
+    depends_on:
+      - nats
+
+  # Subscription Service - JWT provisioning
+  subscription:
+    build:
+      context: .
+      dockerfile: services/subscription/Dockerfile
+    container_name: tradebase_subscription
+    ports:
+      - "8002:8002"
+    environment:
+      - NATS_URL=nats://nats:4222
+      - JWT_ISSUER_SEED=${JWT_ISSUER_SEED}
+      - JWT_DEFAULT_EXPIRY_HOURS=720
+      - OBS_LOG_LEVEL=INFO
+    depends_on:
+      - nats
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # pgAdmin 4 - PostgreSQL/TimescaleDB management UI
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: tradebase_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: pgadmin@tradebase-app.com
+      PGADMIN_DEFAULT_PASSWORD: pgadmin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      - "5050:80"
+    depends_on:
+      - timescaledb
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/pkamin/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  timescaledb_data:
+  nats_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  pgadmin_data:

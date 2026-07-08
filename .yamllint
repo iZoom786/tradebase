@@ -1,0 +1,32 @@
+# Yamllint configuration for Tradebase Platform
+# https://yamllint.readthedocs.io/
+
+extends: default
+
+rules:
+  line-length:
+    max: 120
+    level: warning
+
+  indentation:
+    spaces: 2
+    indent-sequences: true
+
+  comments:
+    min-spaces-from-content: 1
+
+  comments-indentation: {}
+
+  braces:
+    max-spaces-inside: 1
+
+  brackets:
+    max-spaces-inside: 1
+
+  trailing-spaces: enable
+
+  new-line-at-end-of-file: enable
+
+  document-start: disable
+
+  document-end: disable

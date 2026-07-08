@@ -1,0 +1,162 @@
+# Tradebase Platform - Production Environment
+version: '3.8'
+
+services:
+  # TimescaleDB
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: ${DB_DATABASE}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TIMESCALEDB_TELEMETY: basic
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./infrastructure/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NATS
+  nats:
+    image: nats:latest
+    command: "--jetstream --config /etc/nats/nats.conf"
+    volumes:
+      - nats_data:/data
+      - ./infrastructure/nats/nats.conf:/etc/nats/nats.conf:ro
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8222/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./infrastructure/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+
+  # Jaeger
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+
+  # Ingestion Service
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+    environment:
+      DB_HOST: timescaledb
+      NATS_URL: nats://nats:4222
+      OBS_JAEGER_ENDPOINT: http://jaeger:16686
+    depends_on:
+      - timescaledb
+      - nats
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+
+  # Features Service
+  features:
+    build:
+      context: .
+      dockerfile: services/features/Dockerfile
+    environment:
+      DB_HOST: timescaledb
+      NATS_URL: nats://nats:4222
+      REDIS_HOST: redis
+    depends_on:
+      - timescaledb
+      - nats
+      - redis
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+
+  # ML Engine
+  ml_engine:
+    build:
+      context: .
+      dockerfile: services/ml-engine/Dockerfile
+    environment:
+      DB_HOST: timescaledb
+      NATS_URL: nats://nats:4222
+    depends_on:
+      - timescaledb
+      - nats
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+
+  # API Gateway (Nginx)
+  api_gateway:
+    image: nginx:alpine
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - tradebase_network
+    restart: unless-stopped
+
+networks:
+  tradebase_network:
+    driver: bridge
+
+volumes:
+  timescaledb_data:
+  nats_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

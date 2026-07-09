@@ -36,7 +36,7 @@ LABEL maintainer="Tradebase Team"
 LABEL version="${VERSION}"
 LABEL description="Tradebase Ingestion Service - Data ingestion from YFinance"
 LABEL build-date="${BUILD_DATE}"
-
+ENV PIP_ROOT_USER_ACTION=ignore
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \

@@ -20,6 +20,7 @@ COPY services/subscription/ /app/services/subscription/
 RUN mkdir -p /var/log/subscription
 
 # Set Python path
+ENV PIP_ROOT_USER_ACTION=ignore
 ENV PYTHONPATH=/app
 
 # Health check

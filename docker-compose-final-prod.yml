@@ -208,7 +208,7 @@ services:
     restart: unless-stopped
 
 networks:
-  tradebase_net:
+  tradebase_network:
     external: true
     name: itrade-tradebase-e8sqag_tradebase_network
 

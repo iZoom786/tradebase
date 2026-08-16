@@ -208,8 +208,9 @@ services:
     restart: unless-stopped
 
 networks:
-  tradebase_network:
-    driver: bridge
+  tradebase_net:
+    external: true
+    name: itrade-tradebase-e8sqag_tradebase_network
 
 volumes:
   timescaledb_data:

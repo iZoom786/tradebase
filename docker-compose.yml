@@ -112,7 +112,7 @@ services:
 
   # NATS NUI - Web UI for NATS management
   natsnui:
-    image: ghcr.io/nats-nui/nui:latest
+    image: ghcr.io/nats-nui/nui:0.9.3
     container_name: tradebase_natsnui
     ports:
       - "3222:31311"   # Web UI (NUI runs on port 31311 internally)

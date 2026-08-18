@@ -209,8 +209,8 @@ services:
 
 networks:
   tradebase_network:
-    external: true
     name: itrade-tradebase-e8sqag_tradebase_network
+    driver: bridge
 
 volumes:
   timescaledb_data:

@@ -122,7 +122,7 @@ services:
     restart: unless-stopped
 
   natsnui:
-    image: ghcr.io/nats-nui/nui:0.9.3
+    image: ghcr.io/nats-nui/nui:latest
     container_name: tradebase_natsnui
     ports:
       - "3222:31311"

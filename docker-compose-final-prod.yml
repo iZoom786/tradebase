@@ -122,10 +122,14 @@ services:
     restart: unless-stopped
 
   natsnui:
-    image: ghcr.io/nats-nui/nui:latest
+    image: ghcr.io/nats-nui/nui:edge
     container_name: tradebase_natsnui
     ports:
       - "3222:31311"
+    volumes:
+      - ./db:/db
+      - ./tests/clicontext:/subpath/clicontexts
+    command: ["--nats-cli-contexts", "/subpath/clicontexts"]  
     depends_on:
       - nats
     networks:

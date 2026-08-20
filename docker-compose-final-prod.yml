@@ -1,40 +1,6 @@
 services:
 
-  # ============================================================
-  # TIMESCALEDB
-  # ============================================================
-  timescaledb:
-    image: timescale/timescaledb:latest-pg16
-    restart: unless-stopped
-
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-tradebase}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      TIMESCALEDB_TELEMETRY: basic
-
-    ports:
-      - "5432:5432"
-
-    volumes:
-      - timescaledb_data:/var/lib/postgresql/data
-      - ./infrastructure/timescaledb/init_v2.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - /opt/imports:/tmp
-
-    networks:
-      - tradebase_network
-
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tradebase}"
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-
+ 
 
   # ============================================================
   # NATS + JETSTREAM
@@ -242,72 +208,7 @@ services:
       - "traefik.http.routers.tradebase-grafana.service=tradebase-grafana"
 
 
-  # ============================================================
-  # JAEGER
-  # ============================================================
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    restart: unless-stopped
-
-    expose:
-      - "16686"
-      - "14268"
-      - "9411"
-
-    environment:
-      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
-
-    networks:
-      - tradebase_network
-
-
-  # ============================================================
-  # PGADMIN
-  # ============================================================
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    restart: unless-stopped
-
-    expose:
-      - "80"
-
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin@tradebase-app.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-pgadmin123}
-
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_LISTEN_PORT: "80"
-
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-
-    networks:
-      - tradebase_network
-      - dokploy-network
-
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=dokploy-network"
-
-      # HTTP
-      - "traefik.http.routers.tradebase-pgadmin-web.rule=Host(`rds.revoseek.com`)"
-      - "traefik.http.routers.tradebase-pgadmin-web.entrypoints=web"
-      - "traefik.http.routers.tradebase-pgadmin-web.middlewares=redirect-to-https@file"
-
-      # HTTPS
-      - "traefik.http.routers.tradebase-pgadmin.rule=Host(`rds.revoseek.com`)"
-      - "traefik.http.routers.tradebase-pgadmin.entrypoints=websecure"
-      - "traefik.http.routers.tradebase-pgadmin.tls=true"
-      - "traefik.http.routers.tradebase-pgadmin.tls.certresolver=letsencrypt"
-
-      - "traefik.http.services.tradebase-pgadmin.loadbalancer.server.port=80"
-      - "traefik.http.routers.tradebase-pgadmin.service=tradebase-pgadmin"
-
-
+ 
   # ============================================================
   # SUBSCRIPTION SERVICE
   # ============================================================
@@ -418,10 +319,8 @@ networks:
 # PERSISTENT VOLUMES
 # ==============================================================
 volumes:
-  timescaledb_data:
   nats_data:
   natsnui_data:
   redis_data:
   prometheus_data:
-  grafana_data:
-  pgadmin_data:
+  grafana_data: 

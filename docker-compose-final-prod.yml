@@ -106,11 +106,14 @@ services:
   # NATS NUI
   # ============================================================
   natsnui:
-    image: ghcr.io/nats-nui/nui:latest
+    image: ghcr.io/nats-nui/nui:edge
     restart: unless-stopped
 
     expose:
       - "31311"
+
+    volumes:
+      - natsnui_data:/db
 
     depends_on:
       nats:
@@ -124,10 +127,10 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=dokploy-network"
 
-      # HTTP
-      - "traefik.http.routers.tradebase-nui-web.rule=Host(`streaming.revoseek.com`)"
-      - "traefik.http.routers.tradebase-nui-web.entrypoints=web"
-      - "traefik.http.routers.tradebase-nui-web.middlewares=redirect-to-https@file"
+      # HTTP -> HTTPS
+      - "traefik.http.routers.tradebase-nui-http.rule=Host(`streaming.revoseek.com`)"
+      - "traefik.http.routers.tradebase-nui-http.entrypoints=web"
+      - "traefik.http.routers.tradebase-nui-http.middlewares=redirect-to-https@file"
 
       # HTTPS
       - "traefik.http.routers.tradebase-nui.rule=Host(`streaming.revoseek.com`)"
@@ -135,7 +138,7 @@ services:
       - "traefik.http.routers.tradebase-nui.tls=true"
       - "traefik.http.routers.tradebase-nui.tls.certresolver=letsencrypt"
 
-      # NUI internal HTTP port
+      # NUI internal port
       - "traefik.http.services.tradebase-nui.loadbalancer.server.port=31311"
       - "traefik.http.routers.tradebase-nui.service=tradebase-nui"
 
@@ -412,9 +415,9 @@ networks:
 # PERSISTENT VOLUMES
 # ==============================================================
 volumes:
-
   timescaledb_data:
   nats_data:
+  natsnui_data:
   redis_data:
   prometheus_data:
   grafana_data:

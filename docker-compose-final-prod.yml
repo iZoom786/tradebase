@@ -1,7 +1,5 @@
 services:
 
- 
-
   # ============================================================
   # NATS + JETSTREAM
   # ============================================================
@@ -14,8 +12,8 @@ services:
       - "--config"
       - "/etc/nats/nats_simple.conf"
 
+    # Required only when clients outside Docker connect to NATS
     ports:
-      # Keep this only if applications outside Docker use NATS
       - "4222:4222"
 
     expose:
@@ -106,10 +104,10 @@ services:
       - "traefik.http.routers.tradebase-nui.entrypoints=websecure"
       - "traefik.http.routers.tradebase-nui.tls=true"
       - "traefik.http.routers.tradebase-nui.tls.certresolver=letsencrypt"
-
-      # Internal NUI service
-      - "traefik.http.services.tradebase-nui.loadbalancer.server.port=31311"
       - "traefik.http.routers.tradebase-nui.service=tradebase-nui"
+
+      # Internal NUI port
+      - "traefik.http.services.tradebase-nui.loadbalancer.server.port=31311"
 
 
   # ============================================================
@@ -160,9 +158,30 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
 
     networks:
       - tradebase_network
+      - dokploy-network
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=dokploy-network"
+
+      # HTTP -> HTTPS
+      - "traefik.http.routers.tradebase-prometheus-http.rule=Host(`prometheus.revoseek.com`)"
+      - "traefik.http.routers.tradebase-prometheus-http.entrypoints=web"
+      - "traefik.http.routers.tradebase-prometheus-http.middlewares=redirect-to-https@file"
+
+      # HTTPS
+      - "traefik.http.routers.tradebase-prometheus.rule=Host(`prometheus.revoseek.com`)"
+      - "traefik.http.routers.tradebase-prometheus.entrypoints=websecure"
+      - "traefik.http.routers.tradebase-prometheus.tls=true"
+      - "traefik.http.routers.tradebase-prometheus.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.tradebase-prometheus.service=tradebase-prometheus"
+
+      # Internal Prometheus port
+      - "traefik.http.services.tradebase-prometheus.loadbalancer.server.port=9090"
 
 
   # ============================================================
@@ -185,6 +204,9 @@ services:
       - ./infrastructure/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./infrastructure/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
 
+    depends_on:
+      - prometheus
+
     networks:
       - tradebase_network
       - dokploy-network
@@ -193,22 +215,22 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=dokploy-network"
 
-      # HTTP
-      - "traefik.http.routers.tradebase-grafana-web.rule=Host(`grafana.revoseek.com`)"
-      - "traefik.http.routers.tradebase-grafana-web.entrypoints=web"
-      - "traefik.http.routers.tradebase-grafana-web.middlewares=redirect-to-https@file"
+      # HTTP -> HTTPS
+      - "traefik.http.routers.tradebase-grafana-http.rule=Host(`grafana.revoseek.com`)"
+      - "traefik.http.routers.tradebase-grafana-http.entrypoints=web"
+      - "traefik.http.routers.tradebase-grafana-http.middlewares=redirect-to-https@file"
 
       # HTTPS
       - "traefik.http.routers.tradebase-grafana.rule=Host(`grafana.revoseek.com`)"
       - "traefik.http.routers.tradebase-grafana.entrypoints=websecure"
       - "traefik.http.routers.tradebase-grafana.tls=true"
       - "traefik.http.routers.tradebase-grafana.tls.certresolver=letsencrypt"
-
-      - "traefik.http.services.tradebase-grafana.loadbalancer.server.port=3000"
       - "traefik.http.routers.tradebase-grafana.service=tradebase-grafana"
 
+      # Internal Grafana port
+      - "traefik.http.services.tradebase-grafana.loadbalancer.server.port=3000"
 
- 
+
   # ============================================================
   # SUBSCRIPTION SERVICE
   # ============================================================
@@ -250,18 +272,23 @@ services:
 
     expose:
       - "8001"
+      - "9091"
 
     environment:
-      # PostgreSQL / TimescaleDB
-      DB_HOST: timescaledb
-      DB_PORT: "5432"
-      DB_DATABASE: ${POSTGRES_DB:-tradebase}
-      DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
 
-      DB_POOL_SIZE: "20"
+      # --------------------------------------------------------
+      # EXTERNAL POSTGRESQL / TIMESCALEDB
+      # --------------------------------------------------------
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_DATABASE: ${DB_DATABASE:-tradebase}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
 
+      # --------------------------------------------------------
       # NATS
+      # --------------------------------------------------------
       NATS_URL: nats://nats:4222
       NATS_MAX_RECONNECT: "10"
       NATS_PING_INTERVAL: "60"
@@ -271,12 +298,18 @@ services:
       NATS_SYSTEM_USER: ${NATS_SYSTEM_USER:-system_internal}
       NATS_SYSTEM_PASSWORD: ${NATS_SYSTEM_PASSWORD:-system_internal_password}
 
-      # Observability
-      OBS_JAEGER_ENDPOINT: http://jaeger:14268/api/traces
+      # --------------------------------------------------------
+      # OBSERVABILITY
+      # --------------------------------------------------------
       OBS_PROMETHEUS_PORT: "9091"
       OBS_LOG_LEVEL: INFO
 
-      # Market ingestion
+      # Jaeger removed
+      # OBS_JAEGER_ENDPOINT removed
+
+      # --------------------------------------------------------
+      # MARKET INGESTION
+      # --------------------------------------------------------
       INGESTION_PROVIDER: yfinance
       INGESTION_INTERVAL: 1m
 
@@ -289,9 +322,6 @@ services:
       INGESTION_SCHEDULER_INTERVAL_SECONDS: "60"
 
     depends_on:
-      timescaledb:
-        condition: service_healthy
-
       nats:
         condition: service_healthy
 
@@ -323,4 +353,4 @@ volumes:
   natsnui_data:
   redis_data:
   prometheus_data:
-  grafana_data: 
+  grafana_data:

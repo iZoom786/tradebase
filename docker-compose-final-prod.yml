@@ -1,218 +1,418 @@
-# Tradebase Platform - Single-file production deployment for Dockploy
-# Use this file directly as the Docker Compose definition in Dockploy.
 services:
+
+  # ============================================================
+  # TIMESCALEDB
+  # ============================================================
   timescaledb:
     image: timescale/timescaledb:latest-pg16
-    container_name: tradebase_timescaledb
+    restart: unless-stopped
+
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tradebase}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       TIMESCALEDB_TELEMETRY: basic
+
     ports:
       - "5432:5432"
+
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
-      - ./infrastructure/timescaledb/init_v2.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./infrastructure/timescaledb/init_v2.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - /opt/imports:/tmp
+
     networks:
       - tradebase_network
-    restart: unless-stopped
+
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tradebase}"
+        ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 20s
 
+
+  # ============================================================
+  # NATS + JETSTREAM
+  # ============================================================
   nats:
     image: nats:latest
-    container_name: tradebase_nats
-    command: "--jetstream --config /etc/nats/nats_simple.conf"
+    restart: unless-stopped
+
+    command:
+      - "--jetstream"
+      - "--config"
+      - "/etc/nats/nats_simple.conf"
+
     ports:
+      # Keep this only if applications outside Docker use NATS
       - "4222:4222"
-      - "8222:8222"
-      - "8081:8080"
+
+    expose:
+      - "8222"
+
     volumes:
       - nats_data:/data
       - ./infrastructure/nats/nats_simple.conf:/etc/nats/nats_simple.conf:ro
+
     environment:
       NATS_SYSTEM_USER: ${NATS_SYSTEM_USER:-system_internal}
       NATS_SYSTEM_PASSWORD: ${NATS_SYSTEM_PASSWORD:-system_internal_password}
+
     networks:
       - tradebase_network
-    restart: unless-stopped
+
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8222/"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget --quiet --tries=1 --spider http://localhost:8222/ || exit 1"
+        ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 15s
 
+
+  # ============================================================
+  # NATS PROMETHEUS EXPORTER
+  # ============================================================
   nats-exporter:
     image: natsio/prometheus-nats-exporter:latest
-    container_name: tradebase_nats_exporter
-    ports:
-      - "7777:7777"
-    command: ["-connz", "-subz", "-varz", "http://nats:8222"]
-    depends_on:
-      - nats
-    networks:
-      - tradebase_network
     restart: unless-stopped
 
+    expose:
+      - "7777"
+
+    command:
+      - "-connz"
+      - "-subz"
+      - "-varz"
+      - "http://nats:8222"
+
+    depends_on:
+      nats:
+        condition: service_healthy
+
+    networks:
+      - tradebase_network
+
+
+  # ============================================================
+  # NATS NUI
+  # ============================================================
+  natsnui:
+    image: ghcr.io/nats-nui/nui:latest
+    restart: unless-stopped
+
+    expose:
+      - "31311"
+
+    depends_on:
+      nats:
+        condition: service_healthy
+
+    networks:
+      - tradebase_network
+      - dokploy-network
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=dokploy-network"
+
+      # HTTP
+      - "traefik.http.routers.tradebase-nui-web.rule=Host(`streaming.revoseek.com`)"
+      - "traefik.http.routers.tradebase-nui-web.entrypoints=web"
+      - "traefik.http.routers.tradebase-nui-web.middlewares=redirect-to-https@file"
+
+      # HTTPS
+      - "traefik.http.routers.tradebase-nui.rule=Host(`streaming.revoseek.com`)"
+      - "traefik.http.routers.tradebase-nui.entrypoints=websecure"
+      - "traefik.http.routers.tradebase-nui.tls=true"
+      - "traefik.http.routers.tradebase-nui.tls.certresolver=letsencrypt"
+
+      # NUI internal HTTP port
+      - "traefik.http.services.tradebase-nui.loadbalancer.server.port=31311"
+      - "traefik.http.routers.tradebase-nui.service=tradebase-nui"
+
+
+  # ============================================================
+  # REDIS
+  # ============================================================
   redis:
     image: redis:7-alpine
-    container_name: tradebase_redis
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
+
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+
+    expose:
+      - "6379"
+
     volumes:
       - redis_data:/data
+
     networks:
       - tradebase_network
-    restart: unless-stopped
+
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        - CMD
+        - redis-cli
+        - ping
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
+
+  # ============================================================
+  # PROMETHEUS
+  # ============================================================
   prometheus:
     image: prom/prometheus:latest
-    container_name: tradebase_prometheus
-    ports:
-      - "9090:9090"
+    restart: unless-stopped
+
+    expose:
+      - "9090"
+
     volumes:
       - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+
     networks:
       - tradebase_network
-    restart: unless-stopped
 
+
+  # ============================================================
+  # GRAFANA
+  # ============================================================
   grafana:
     image: grafana/grafana:latest
-    container_name: tradebase_grafana
-    ports:
-      - "3001:3000"
+    restart: unless-stopped
+
+    expose:
+      - "3000"
+
     environment:
       GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
+
     volumes:
       - grafana_data:/var/lib/grafana
       - ./infrastructure/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./infrastructure/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+
     networks:
       - tradebase_network
-    restart: unless-stopped
+      - dokploy-network
 
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=dokploy-network"
+
+      # HTTP
+      - "traefik.http.routers.tradebase-grafana-web.rule=Host(`grafana.revoseek.com`)"
+      - "traefik.http.routers.tradebase-grafana-web.entrypoints=web"
+      - "traefik.http.routers.tradebase-grafana-web.middlewares=redirect-to-https@file"
+
+      # HTTPS
+      - "traefik.http.routers.tradebase-grafana.rule=Host(`grafana.revoseek.com`)"
+      - "traefik.http.routers.tradebase-grafana.entrypoints=websecure"
+      - "traefik.http.routers.tradebase-grafana.tls=true"
+      - "traefik.http.routers.tradebase-grafana.tls.certresolver=letsencrypt"
+
+      - "traefik.http.services.tradebase-grafana.loadbalancer.server.port=3000"
+      - "traefik.http.routers.tradebase-grafana.service=tradebase-grafana"
+
+
+  # ============================================================
+  # JAEGER
+  # ============================================================
   jaeger:
     image: jaegertracing/all-in-one:latest
-    container_name: tradebase_jaeger
-    ports:
-      - "16686:16686"
-      - "14268:14268"
-    environment:
-      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
-    networks:
-      - tradebase_network
     restart: unless-stopped
 
-  natsnui:
-    image: local/nui:0.9.3
-    container_name: tradebase_natsnui
-    ports:
-      - "3222:31311"
-    depends_on:
-      - nats
+    expose:
+      - "16686"
+      - "14268"
+      - "9411"
+
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+
     networks:
       - tradebase_network
 
+
+  # ============================================================
+  # PGADMIN
+  # ============================================================
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: tradebase_pgadmin
+    restart: unless-stopped
+
+    expose:
+      - "80"
+
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin@tradebase-app.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-pgadmin123}
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-      PGADMIN_LISTEN_PORT: 80
-    ports:
-      - "5050:80"
-    depends_on:
-      - timescaledb
+
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_LISTEN_PORT: "80"
+
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
     networks:
       - tradebase_network
-    restart: unless-stopped
+      - dokploy-network
 
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=dokploy-network"
+
+      # HTTP
+      - "traefik.http.routers.tradebase-pgadmin-web.rule=Host(`rds.revoseek.com`)"
+      - "traefik.http.routers.tradebase-pgadmin-web.entrypoints=web"
+      - "traefik.http.routers.tradebase-pgadmin-web.middlewares=redirect-to-https@file"
+
+      # HTTPS
+      - "traefik.http.routers.tradebase-pgadmin.rule=Host(`rds.revoseek.com`)"
+      - "traefik.http.routers.tradebase-pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.tradebase-pgadmin.tls=true"
+      - "traefik.http.routers.tradebase-pgadmin.tls.certresolver=letsencrypt"
+
+      - "traefik.http.services.tradebase-pgadmin.loadbalancer.server.port=80"
+      - "traefik.http.routers.tradebase-pgadmin.service=tradebase-pgadmin"
+
+
+  # ============================================================
+  # SUBSCRIPTION SERVICE
+  # ============================================================
   subscription:
     build:
       context: .
       dockerfile: services/subscription/Dockerfile
-    container_name: tradebase_subscription
-    ports:
-      - "8002:8002"
-    environment:
-      NATS_URL: nats://nats:4222
-      JWT_ISSUER_SEED: ${JWT_ISSUER_SEED:-change_me_in_production}
-      JWT_DEFAULT_EXPIRY_HOURS: ${JWT_DEFAULT_EXPIRY_HOURS:-720}
-      OBS_LOG_LEVEL: ${OBS_LOG_LEVEL:-INFO}
-    depends_on:
-      - nats
-    networks:
-      - tradebase_network
+
     restart: unless-stopped
 
+    expose:
+      - "8002"
+
+    environment:
+      NATS_URL: nats://nats:4222
+
+      JWT_ISSUER_SEED: ${JWT_ISSUER_SEED:-change_me_in_production}
+      JWT_DEFAULT_EXPIRY_HOURS: ${JWT_DEFAULT_EXPIRY_HOURS:-720}
+
+      OBS_LOG_LEVEL: ${OBS_LOG_LEVEL:-INFO}
+
+    depends_on:
+      nats:
+        condition: service_healthy
+
+    networks:
+      - tradebase_network
+
+
+  # ============================================================
+  # INGESTION SERVICE
+  # ============================================================
   ingestion:
     build:
       context: .
       dockerfile: services/ingestion/Dockerfile
-    container_name: tradebase_ingestion
-    ports:
-      - "8001:8001"
+
+    restart: unless-stopped
+
+    expose:
+      - "8001"
+
     environment:
+      # PostgreSQL / TimescaleDB
       DB_HOST: timescaledb
-      DB_PORT: 5432
+      DB_PORT: "5432"
       DB_DATABASE: ${POSTGRES_DB:-tradebase}
       DB_USER: ${POSTGRES_USER:-postgres}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      DB_POOL_SIZE: 20
+
+      DB_POOL_SIZE: "20"
+
+      # NATS
       NATS_URL: nats://nats:4222
-      NATS_MAX_RECONNECT: 10
-      NATS_PING_INTERVAL: 60
-      NATS_CONNECT_TIMEOUT: 5
+      NATS_MAX_RECONNECT: "10"
+      NATS_PING_INTERVAL: "60"
+      NATS_CONNECT_TIMEOUT: "5"
       NATS_TLS_ENABLED: "false"
+
       NATS_SYSTEM_USER: ${NATS_SYSTEM_USER:-system_internal}
       NATS_SYSTEM_PASSWORD: ${NATS_SYSTEM_PASSWORD:-system_internal_password}
+
+      # Observability
       OBS_JAEGER_ENDPOINT: http://jaeger:14268/api/traces
-      OBS_PROMETHEUS_PORT: 9091
+      OBS_PROMETHEUS_PORT: "9091"
       OBS_LOG_LEVEL: INFO
+
+      # Market ingestion
       INGESTION_PROVIDER: yfinance
       INGESTION_INTERVAL: 1m
-      INGESTION_SYMBOLS: EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,USDCAD,NZDUSD
-      INGESTION_BACKFILL_DAYS: 365
+
+      INGESTION_SYMBOLS: >-
+        EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,USDCAD,NZDUSD
+
+      INGESTION_BACKFILL_DAYS: "365"
+
       INGESTION_SCHEDULER_ENABLED: "true"
-      INGESTION_SCHEDULER_INTERVAL_SECONDS: 60
+      INGESTION_SCHEDULER_INTERVAL_SECONDS: "60"
+
     depends_on:
-      - timescaledb
-      - nats
+      timescaledb:
+        condition: service_healthy
+
+      nats:
+        condition: service_healthy
+
     volumes:
       - ./logs/ingestion:/app/logs
       - ./config:/app/config:ro
+
     networks:
       - tradebase_network
-    restart: unless-stopped
 
+
+# ==============================================================
+# NETWORKS
+# ==============================================================
 networks:
+
   tradebase_network:
-    name: itrade-tradebase-e8sqag_tradebase_network
     driver: bridge
 
+  dokploy-network:
+    external: true
+
+
+# ==============================================================
+# PERSISTENT VOLUMES
+# ==============================================================
 volumes:
+
   timescaledb_data:
   nats_data:
   redis_data:

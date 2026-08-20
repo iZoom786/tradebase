@@ -12,7 +12,7 @@ services:
       - "/etc/nats/nats_simple.conf"
 
     ports:
-      - "4222:4222"
+      - "4223:4222"
 
     expose:
       - "8222"

@@ -106,7 +106,10 @@ services:
   # NATS NUI
   # ============================================================
   natsnui:
-    image: ghcr.io/nats-nui/nui:edge
+    build:
+      context: https://github.com/nats-nui/nui.git#v0.9.3
+      dockerfile: Dockerfile
+
     restart: unless-stopped
 
     expose:
@@ -138,7 +141,7 @@ services:
       - "traefik.http.routers.tradebase-nui.tls=true"
       - "traefik.http.routers.tradebase-nui.tls.certresolver=letsencrypt"
 
-      # NUI internal port
+      # Internal NUI service
       - "traefik.http.services.tradebase-nui.loadbalancer.server.port=31311"
       - "traefik.http.routers.tradebase-nui.service=tradebase-nui"
 

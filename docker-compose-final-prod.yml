@@ -75,11 +75,11 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=dokploy-network"
 
-      - "traefik.http.routers.tradebase-nui-http.rule=Host(`streaming.revoseek.com`)"
+      - "traefik.http.routers.tradebase-nui-http.rule=Host(`streaming.primelakehouse.com`)"
       - "traefik.http.routers.tradebase-nui-http.entrypoints=web"
       - "traefik.http.routers.tradebase-nui-http.middlewares=redirect-to-https@file"
 
-      - "traefik.http.routers.tradebase-nui.rule=Host(`streaming.revoseek.com`)"
+      - "traefik.http.routers.tradebase-nui.rule=Host(`streaming.primelakehouse.com`)"
       - "traefik.http.routers.tradebase-nui.entrypoints=websecure"
       - "traefik.http.routers.tradebase-nui.tls=true"
       - "traefik.http.routers.tradebase-nui.tls.certresolver=letsencrypt"
@@ -146,11 +146,11 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=dokploy-network"
 
-      - "traefik.http.routers.tradebase-prometheus-http.rule=Host(`prometheus.revoseek.com`)"
+      - "traefik.http.routers.tradebase-prometheus-http.rule=Host(`prometheus.primelakehouse.com`)"
       - "traefik.http.routers.tradebase-prometheus-http.entrypoints=web"
       - "traefik.http.routers.tradebase-prometheus-http.middlewares=redirect-to-https@file"
 
-      - "traefik.http.routers.tradebase-prometheus.rule=Host(`prometheus.revoseek.com`)"
+      - "traefik.http.routers.tradebase-prometheus.rule=Host(`prometheus.primelakehouse.com`)"
       - "traefik.http.routers.tradebase-prometheus.entrypoints=websecure"
       - "traefik.http.routers.tradebase-prometheus.tls=true"
       - "traefik.http.routers.tradebase-prometheus.tls.certresolver=letsencrypt"
@@ -190,11 +190,11 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=dokploy-network"
 
-      - "traefik.http.routers.tradebase-grafana-http.rule=Host(`grafana.revoseek.com`)"
+      - "traefik.http.routers.tradebase-grafana-http.rule=Host(`grafana.primelakehouse.com`)"
       - "traefik.http.routers.tradebase-grafana-http.entrypoints=web"
       - "traefik.http.routers.tradebase-grafana-http.middlewares=redirect-to-https@file"
 
-      - "traefik.http.routers.tradebase-grafana.rule=Host(`grafana.revoseek.com`)"
+      - "traefik.http.routers.tradebase-grafana.rule=Host(`grafana.primelakehouse.com`)"
       - "traefik.http.routers.tradebase-grafana.entrypoints=websecure"
       - "traefik.http.routers.tradebase-grafana.tls=true"
       - "traefik.http.routers.tradebase-grafana.tls.certresolver=letsencrypt"
